@@ -5,6 +5,7 @@ from tree_sitter import Language, Parser, Query, QueryCursor
 
 from pathlib import Path
 import networkx as nx
+from pyvis.network import Network
 
 import matplotlib
 
@@ -40,10 +41,11 @@ def dependencies_graph(code_root_folder):
 
 
 def draw_graph(G, size, **args):
-    plt.figure(figsize=size)
-    pos = nx.spring_layout(G, scale=1)
-    nx.draw_kamada_kawai(G, font_color="gray", **args)
-    plt.show()
+    net = Network(height="750px", width="100%")
+
+    net.from_nx(G)
+    net.show_buttons(filter_=["physics"])
+    net.show("graph.html", notebook=False)
 
 
 def dependencies_digraph(code_root_folder):

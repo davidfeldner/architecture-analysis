@@ -35,6 +35,8 @@
 
           shellHook = ''
             uv sync
+            source .venv/bin/activate
+            exec ${pkgs.fish}/bin/fish
           '';
         };
       }
