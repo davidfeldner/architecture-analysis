@@ -1,4 +1,3 @@
-
 import matplotlib.pyplot as plt
 import tree_sitter_typescript as ts_typescript
 from tree_sitter import Language, Parser, Query, QueryCursor
@@ -8,9 +7,17 @@ from pathlib import Path
 import networkx as nx
 
 import matplotlib
+
+import git
+import os
+
 matplotlib.use("TkAgg")
 
-CODE_ROOT_FOLDER = "../immich/server/src"
+CODE_ROOT_FOLDER = "src/server/src/"
+
+
+def get_source(remote="https://github.com/immich-app/immich.git"):
+    git.Repo.clone_from(remote, "src")
 
 
 def dependencies_graph(code_root_folder):
@@ -35,7 +42,7 @@ def dependencies_graph(code_root_folder):
 def draw_graph(G, size, **args):
     plt.figure(figsize=size)
     pos = nx.spring_layout(G, scale=1)
-    nx.draw(G, font_color="gray", pos=pos, **args)
+    nx.draw_kamada_kawai(G, font_color="gray", **args)
     plt.show()
 
 
@@ -48,6 +55,9 @@ def dependencies_digraph(code_root_folder):
         file_path = str(file)
 
         source_module = module_name_from_file_path(file_path)
+
+        if not applyFilters(source_module):
+            continue
 
         if source_module not in G.nodes:
             G.add_node(source_module)
@@ -63,12 +73,23 @@ def dependencies_digraph(code_root_folder):
 def module_name_from_file_path(full_path):
     # e.g. ../core/model/user.py -> zeeguu.core.model.user
 
-    file_name = full_path[len(CODE_ROOT_FOLDER):].replace(".ts", "")
+    full_path = full_path[len(CODE_ROOT_FOLDER) - 4 :]
+
+    file_name = full_path.replace(".ts", "")
     return file_name
 
 
 TS_LANGUAGE = Language(ts_typescript.language_typescript())
 parser = Parser(TS_LANGUAGE)
+
+
+def applyFilters(content):
+    if content.startswith("src/schema/migrations"):
+        return False
+
+    if content.startswith("@immich") or content.startswith("src"):
+        return True
+    return False
 
 
 def imports_from_file(filename: str):
@@ -79,13 +100,16 @@ def imports_from_file(filename: str):
     tree = parser.parse(source)
     root = tree.root_node
 
-    for child in root.children:
-        print(child.type)
+    # for child in root.children:
+    #    print(child.type)
 
-    query = Query(TS_LANGUAGE, """
+    query = Query(
+        TS_LANGUAGE,
+        """
     (import_statement
     source: (string (string_fragment) @source))
-    """)
+    """,
+    )
 
     cursor = QueryCursor(query)
     captures = cursor.captures(root)
@@ -94,13 +118,17 @@ def imports_from_file(filename: str):
     if "source" not in captures:
         return []
     for node in captures["source"]:
-        print(node.text.decode())
-        res.append(node.text.decode())
+        content = node.text.decode()
+        if applyFilters(content):
+            # print(content)
+            res.append(content)
 
     return res
 
 
 def main():
+    if not os.path.exists(CODE_ROOT_FOLDER):
+        get_source()
     DG = dependencies_digraph(CODE_ROOT_FOLDER)
     draw_graph(DG, (40, 40), with_labels=True)
 
