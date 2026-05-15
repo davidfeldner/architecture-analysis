@@ -1,5 +1,3 @@
-import matplotlib.pyplot as plt
-from numpy import add, shape
 import tree_sitter_typescript as ts_typescript
 from tree_sitter import Language, Parser, Query, QueryCursor
 
@@ -13,6 +11,8 @@ import git
 import os
 from collections import defaultdict
 
+from evolution_metrics import module_churn
+
 matplotlib.use("TkAgg")
 
 CODE_ROOT_FOLDER = "src/server/src/"
@@ -22,48 +22,25 @@ def get_source(remote="https://github.com/immich-app/immich.git"):
     git.Repo.clone_from(remote, "src")
 
 
-def make_graph():
-    net = Network(directed=True, height="750px", width="100%")
+def add_node(net, name, color, label=None, size=None, title=None):
+    font = {
+        "color": color,
+        "background": "#eef2ff",
+        "strokeWidth": 0.2,
+        "strokeColor": "#ffffff",
+    }
+    if size is not None:
+        font["size"] = size
 
-    #
-    # net.set_options("""
-    #     var options = {
-    #         "physics": {
-    #             "enabled": false
-    #         },
-    #         "edges": {
-    #             "smooth": {
-    #                 "enabled": false
-    #             }
-    #         }
-    #     }
-    #     """)
-    return net
-
-
-def draw_graph(net):
-
-    # net.from_nx(G)
-    # net.show_buttons()
-    # net.barnes_hut(overlap=0.5, spring_strength=0.01, spring_length=500, gravity=-8000)
-    net.show("graph.html", notebook=False)
-
-
-def add_node(net, name, color, label=None):
     net.add_node(
         name,
         label=label or name,
         color=color,
         shape="box",
-        # size=0,
-        # mass=1,
-        font={
-            # "size": 40,
-            "color": color,
-            "background": "#eef2ff",
-            "strokeWidth": 0.2,
-            "strokeColor": "#ffffff",
-        },
+        size=size,
+        value=size,
+        title=title,
+        font=font,
     )
 
 
@@ -81,10 +58,34 @@ def filter_migrations(content):
     return True
 
 
+def churn_size(module, churn):
+    max_churn = max(churn.values(), default=0)
+
+    return 1 + int(40 * churn.get(module, 0) / (max_churn*0.8))
+
+
+def set_barnes_hut(net):
+    net.set_options("""
+    var options = {
+        "physics": {
+            "enabled": true,
+            "barnesHut": {
+                "gravitationalConstant": -1800,
+                "springLength": 220,
+                "springConstant": 0.02,
+                "damping": 0.55
+            },
+            "solver": "barnesHut"
+        }
+    }
+    """)
+
+
 def dependencies_digraph(code_root_folder, filter_lib=True, filter_mig=True):
     net = Network(directed=True, height="750px", width="100%")
 
     files = Path(code_root_folder).rglob("*.ts")
+    churn = module_churn("src")
 
     references = defaultdict(lambda: defaultdict(int))
     for file in files:
@@ -98,7 +99,13 @@ def dependencies_digraph(code_root_folder, filter_lib=True, filter_mig=True):
         ):
             continue
 
-        add_node(net, source_module, "#2255aa")
+        add_node(
+            net,
+            source_module,
+            "#2255aa",
+            size=churn_size(source_module, churn),
+            title=f"churn: {churn.get(source_module, 0)}",
+        )
 
         for target_module in imports_from_file(file_path):
             if (
@@ -114,15 +121,20 @@ def dependencies_digraph(code_root_folder, filter_lib=True, filter_mig=True):
             if s == t:
                 continue
             if t not in references:
-                add_node(net, t, "#2255aa")
+                add_node(
+                    net,
+                    t,
+                    "#2255aa",
+                    size=churn_size(t, churn),
+                    title=f"churn: {churn.get(t, 0)}",
+                )
             net.add_edge(
                 s,
                 t,
                 label=str(references[s][t])
             )
 
-    net.barnes_hut(overlap=0.5, spring_strength=0.01,
-                   spring_length=500, gravity=-8000)
+    set_barnes_hut(net)
 
     return net
 
@@ -178,8 +190,6 @@ def dependencies_digraph_hierarchical(code_root_folder, filter_lib=True, filter_
             add_node(net, target_node, target_color, target_label)
             references[source_node][target_node] += 1
 
-        # print(module_name + "=>" + each + ".")
-    print(references)
     for s in references:
         for t in references[s]:
             if s == t:
@@ -195,14 +205,7 @@ def dependencies_digraph_hierarchical(code_root_folder, filter_lib=True, filter_
                 s,
                 t,
                 label=str(references[s][t]),
-                # font={"size": 20},
                 width=0.5 + weight * 0.1,
-                # arrows={
-                #     "to": {
-                #         "enabled": True,
-                #         "scaleFactor": 0.5,  # keeps arrowhead small regardless of width
-                #     }
-                # },
             )
     if physics:
         net.show_buttons()
@@ -226,7 +229,6 @@ def hierarchical_module(module, depth, show_files=True):
 
 
 def module_name_from_file_path(full_path):
-    # e.g. ../core/model/user.py -> zeeguu.core.model.user
 
     # File paths are under src/server/src, but imports start at src/.
     if full_path.startswith(CODE_ROOT_FOLDER):
@@ -283,7 +285,6 @@ def imports_from_file(filename: str):
     for node in captures["source"]:
         content = node.text.decode()
         if applyFilters(content):
-            # print(content)
             res.append(content)
 
     return res
@@ -293,7 +294,7 @@ def main():
     if not os.path.exists(CODE_ROOT_FOLDER):
         get_source()
     net = dependencies_digraph_hierarchical(CODE_ROOT_FOLDER)
-    draw_graph(net)
+    net.show("graph.html", notebook=False)
 
 
 if __name__ == "__main__":
